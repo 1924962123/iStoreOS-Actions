@@ -24,7 +24,7 @@
 > [!TIP]
 > 😂此固件为 **非官方构建，不保证完全无BUG** ，请知悉😂
 > 
-> 😂如果当前项目严重影响使用，欢迎您探索右侧项目😂👉👉👉[iStoreOS-Native](https://github.com/Kwonelee/iStoreOS-Native)
+> 😂若当前项目严重影响您的使用，欢迎您探索右侧项目😂👉👉👉[iStoreOS-Native](https://github.com/Kwonelee/iStoreOS-Native)
 > 
 > 使用此仓库必须设置机密token，Actions云构建固件时需要用到，通常在仓库设置里面。机密键名为 **`GH_TOKEN`**（严禁在仓库可视代码中填写，否则后果自负）
 
