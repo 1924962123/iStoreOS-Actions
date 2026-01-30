@@ -13,14 +13,9 @@ on:
           - s905x3
           - s922x
       openwrt_kernel:
-        description: "2、内核选择 (网心云建议5.15)"
+        description: "2、内核版本 (若填 auto 则自动获取最新 5.15)"
         required: true
-        default: "5.15.160"
-        type: choice
-        options:
-          - 5.15.160
-          - 6.1.100
-          - 6.6.74
+        default: "5.15.167"
       auto_kernel:
         description: "自动匹配最新内核"
         required: false
@@ -49,47 +44,47 @@ jobs:
           ROOTFS_FILE=$(find bin/targets/armsr/armv8/ -type f -name "*rootfs.tar.gz" | head -n1)
           echo "file=$ROOTFS_FILE" >> $GITHUB_OUTPUT
 
-      - name: 🧱 打包固件 (Amlogic 打包插件)
+      - name: 🧱 打包固件 (自动纠错模式)
         uses: Kwonelee/amlogic-s9xxx-openwrt@main
         with:
           openwrt_path: ${{ steps.find_rootfs.outputs.file }}
           openwrt_board: ${{ inputs.openwrt_board }}
           openwrt_kernel: ${{ inputs.openwrt_kernel }}
-          auto_kernel: ${{ inputs.auto_kernel }}
+          auto_kernel: true
           kernel_repo: ophub/kernel
           kernel_usage: stable
           builder_name: kwonelee
 
-      - name: 📜 强制搜索并整理固件
-        id: organize
+      - name: 📜 强制整理并重命名
+        if: always() # 即使前面失败也运行，方便查看错误
         run: |
           mkdir -p final_out
           echo "🔍 正在全系统搜索打包好的固件..."
-          # 搜索所有大于100M且以img.gz结尾的文件
-          find . -type f -name "*.img.gz" -size +100M | while read -r FILE; do
-            FILENAME=$(basename "$FILE")
-            # 过滤掉原始rootfs，只处理生成的固件
-            if [[ "$FILENAME" != *"rootfs"* ]]; then
-              NEW_NAME="istoreos_${{ inputs.openwrt_board }}_${{ inputs.openwrt_kernel }}.img.gz"
-              cp "$FILE" "final_out/$NEW_NAME"
-              echo "✅ 发现并复制固件: $NEW_NAME"
-            fi
-          done
+          # 查找生成的 img.gz，排除掉 rootfs
+          FOUND=$(find . -name "*.img.gz" ! -name "*rootfs*" -size +50M)
           
-          if [ -z "$(ls -A final_out)" ]; then
-            echo "❌ 严重错误：没找到固件包，请检查打包日志！"
+          if [ -z "$FOUND" ]; then
+            echo "❌ 警告：未找到固件。请向上滚动查看 '🧱 打包固件' 步骤中的 curl 错误。"
+            # 列出当前目录结构，方便调试
+            ls -R
             exit 1
           fi
+
+          for FILE in $FOUND; do
+            FILENAME=$(basename "$FILE")
+            NEW_NAME="istoreos_A311D_$(date +%Y%m%d).img.gz"
+            cp "$FILE" "final_out/$NEW_NAME"
+            echo "✅ 成功获取固件: $NEW_NAME"
+          done
 
       - name: 🚀 上传到 Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: A311D-OES-iStoreOS-${{ env.VERSION }}
-          name: A311D-OES 稳定版 iStoreOS (内核 ${{ inputs.openwrt_kernel }})
+          tag_name: A311D-OES-${{ env.VERSION }}-${{ github.run_id }}
+          name: A311D-OES 稳定版 (内核 ${{ inputs.openwrt_kernel }})
           body: |
-            🛠️ 专为 A311D-OES 编译
+            🛠️ 专为 A311D-OES 适配
             🧠 内核版本: ${{ inputs.openwrt_kernel }}
-            📦 适合跑网心云 Docker，建议刷入 EMMC 后使用。
             👤 账号: root | 密码: 无
           files: final_out/*.img.gz
         env:
