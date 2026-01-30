@@ -4,6 +4,8 @@ on:
 
 env:
   VERSION: 24.10.5
+  # 这里定义目前 kernel_stable 中真实存在且最稳的版本
+  K_VER: "5.15.167" 
 
 jobs:
   build:
@@ -18,42 +20,55 @@ jobs:
           curl -L -o bin/targets/armsr/armv8/openwrt-armvirt-64-default-rootfs.tar.gz \
             https://github.com/Kwonelee/Rootfs-Actions/releases/download/generic-rootfs/istoreos-armsr-armv8-generic-rootfs.tar.gz
 
-      - name: 🔍 预载内核 (防止插件下载 404)
+      - name: 🚀 强行注入内核 (解决 404)
         run: |
-          # 创建插件默认的内核存放目录
+          # 创建插件默认搜索内核的本地目录
           mkdir -p amlogic-s9xxx-openwrt/amlogic-kernel
-          echo "正在强行下载 A311D 稳定内核..."
-          # 这里使用 ophub 仓库里真实存在的 5.15.167 链接
-          curl -L -o amlogic-s9xxx-openwrt/amlogic-kernel/5.15.167.tar.gz \
-            https://github.com/ophub/kernel/releases/download/kernel_stable/5.15.167.tar.gz
-          echo "✅ 内核预载完成"
+          echo "正在从 ophub 强行下载 A311D 稳定版内核..."
+          # 直接使用浏览器能访问的真实下载地址 
+          curl -L -o amlogic-s9xxx-openwrt/amlogic-kernel/${{ env.K_VER }}.tar.gz \
+            https://github.com/ophub/kernel/releases/download/kernel_stable/${{ env.K_VER }}.tar.gz
+          
+          if [ ! -f "amlogic-s9xxx-openwrt/amlogic-kernel/${{ env.K_VER }}.tar.gz" ]; then
+            echo "❌ 内核下载失败，请检查链接！"
+            exit 1
+          fi
+          echo "✅ 内核已准备就绪"
 
       - name: 🧱 打包固件
         uses: Kwonelee/amlogic-s9xxx-openwrt@main
         with:
           openwrt_path: bin/targets/armsr/armv8/openwrt-armvirt-64-default-rootfs.tar.gz
           openwrt_board: a311d-oes
-          openwrt_kernel: 5.15.167
-          auto_kernel: false  # 必须设为 false，防止它去乱搜别的版本
+          openwrt_kernel: ${{ env.K_VER }}
+          auto_kernel: false  # 关键：设为 false，强制它用我们刚才下载好的本地内核
           kernel_repo: ophub/kernel
           kernel_usage: stable
 
-      - name: 📜 整理固件
+      - name: 📜 整理并搜寻固件
         run: |
           mkdir -p final_out
-          # 直接去 output 目录下找，那是插件的默认输出
-          if [ -d "output" ]; then
-            cp output/*.img.gz final_out/ 2>/dev/null || true
-          fi
-          # 如果没找到，全系统搜
+          # 1. 尝试从默认输出目录找
+          [ -d "output" ] && cp output/*.img.gz final_out/ 2>/dev/null || true
+          
+          # 2. 如果没找到，全系统搜索生成的 img.gz
           if [ -z "$(ls -A final_out)" ]; then
             find . -name "*.img.gz" ! -name "*rootfs*" -exec cp {} final_out/ \;
+          fi
+          
+          if [ -z "$(ls -A final_out)" ]; then
+            echo "❌ 还是没找到固件包，打包逻辑可能由于内核不匹配中断了"
+            exit 1
           fi
 
       - name: 🚀 上传到 Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: A311D-OES-Fixed-${{ github.run_id }}
+          tag_name: A311D-OES-iStoreOS-${{ github.run_id }}
+          name: A311D-OES 专属 iStoreOS (内核 ${{ env.K_VER }})
+          body: |
+            👤 账号: root | 密码: 无
+            🧠 内核版本: ${{ env.K_VER }} (已解决 404 注入问题)
           files: final_out/*.img.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
