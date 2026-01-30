@@ -1,4 +1,4 @@
-name: 💿 StX_Build-A311D-OES-AutoFix
+name: 💿 StX_Build-A311D-OES-FinalFix
 on:
   workflow_dispatch:
 
@@ -18,32 +18,34 @@ jobs:
           curl -L -o bin/targets/armsr/armv8/openwrt-armvirt-64-default-rootfs.tar.gz \
             https://github.com/Kwonelee/Rootfs-Actions/releases/download/generic-rootfs/istoreos-armsr-armv8-generic-rootfs.tar.gz
 
-      - name: 🔍 动态获取内核下载链接 (解决404)
+      - name: 🔍 动态获取内核并注入
         id: get_kernel
         run: |
           echo "🌐 正在从 ophub 仓库检索 5.15 稳定版内核..."
-          # 爬取 Release 页面并筛选 5.15 的 .tar.gz 文件名
+          # 获取真实文件名
           KERNEL_FILE=$(curl -s https://api.github.com/repos/ophub/kernel/releases/tags/kernel_stable | grep "name" | grep "5.15" | grep ".tar.gz" | head -n 1 | cut -d '"' -f 4)
           
           if [ -z "$KERNEL_FILE" ]; then
-            echo "❌ 无法找到 5.15 内核文件，尝试检索 6.1..."
-            KERNEL_FILE=$(curl -s https://api.github.com/repos/ophub/kernel/releases/tags/kernel_stable | grep "name" | grep "6.1" | grep ".tar.gz" | head -n 1 | cut -d '"' -f 4)
+            echo "❌ 无法找到 5.15 内核文件"
+            exit 1
           fi
           
-          # 提取纯版本号用于插件识别 (例如 5.15.167)
+          # 提取纯版本号 (例如 5.15.193)
           K_VER=$(echo $KERNEL_FILE | cut -d '.' -f 1,2,3 | cut -d '-' -f 1)
           
           echo "✅ 找到最新内核文件: $KERNEL_FILE"
-          echo "k_file=$KERNEL_FILE" >> $GITHUB_OUTPUT
           echo "k_ver=$K_VER" >> $GITHUB_OUTPUT
           
-          # 提前下载到插件目录
+          # 下载内核
           mkdir -p amlogic-s9xxx-openwrt/amlogic-kernel
           curl -L -o amlogic-s9xxx-openwrt/amlogic-kernel/$KERNEL_FILE \
             https://github.com/ophub/kernel/releases/download/kernel_stable/$KERNEL_FILE
           
-          # 建立软链接，防止插件找不到对应的文件名
-          ln -s $KERNEL_FILE amlogic-s9xxx-openwrt/amlogic-kernel/$K_VER.tar.gz
+          # --- 修正点：只有当文件名不一致时才创建软链接，且使用 -sf 强制覆盖 ---
+          if [ "$KERNEL_FILE" != "$K_VER.tar.gz" ]; then
+            ln -sf $KERNEL_FILE amlogic-s9xxx-openwrt/amlogic-kernel/$K_VER.tar.gz
+          fi
+          echo "✅ 内核注入完成"
 
       - name: 🧱 打包固件
         uses: Kwonelee/amlogic-s9xxx-openwrt@main
@@ -55,14 +57,15 @@ jobs:
           kernel_repo: ophub/kernel
           kernel_usage: stable
 
-      - name: 📜 整理并搜寻固件
+      - name: 📜 搜寻并整理固件
+        if: always()
         run: |
           mkdir -p final_out
-          # 全局搜索生成的 img.gz
+          # 查找所有大于 50M 的固件包
           find . -name "*.img.gz" ! -name "*rootfs*" -size +50M -exec cp {} final_out/ \;
           
           if [ -z "$(ls -A final_out)" ]; then
-            echo "❌ 打包失败，未生成固件包。"
+            echo "❌ 打包未成功，请检查上方 '🧱 打包固件' 步骤日志。"
             exit 1
           fi
 
@@ -70,11 +73,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: A311D-OES-iStoreOS-${{ github.run_id }}
-          name: A311D-OES 自动匹配版 (内核 ${{ steps.get_kernel.outputs.k_ver }})
+          name: A311D-OES 稳定版 (内核 ${{ steps.get_kernel.outputs.k_ver }})
           body: |
-            🛠️ 专为 A311D-OES 适配
-            🧠 自动匹配内核: ${{ steps.get_kernel.outputs.k_file }}
-            👤 用户: root | 密码: 无
+            🛠️ A311D-OES 专用固件
+            🧠 内核版本: ${{ steps.get_kernel.outputs.k_ver }}
+            👤 账号: root | 密码: 无
           files: final_out/*.img.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
