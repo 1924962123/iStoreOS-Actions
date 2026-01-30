@@ -1,26 +1,6 @@
-name: 💿 StX_Build-A311D-OES-iStoreOS
+name: 💿 StX_Build-A311D-OES-Fixed
 on:
-  repository_dispatch:
   workflow_dispatch:
-    inputs:
-      openwrt_board:
-        description: "1、设备型号"
-        required: true
-        default: "a311d-oes"
-        type: choice
-        options:
-          - a311d-oes
-          - s905x3
-          - s922x
-      openwrt_kernel:
-        description: "2、内核版本 (若填 auto 则自动获取最新 5.15)"
-        required: true
-        default: "5.15.167"
-      auto_kernel:
-        description: "自动匹配最新内核"
-        required: false
-        default: true
-        type: boolean
 
 env:
   VERSION: 24.10.5
@@ -38,54 +18,42 @@ jobs:
           curl -L -o bin/targets/armsr/armv8/openwrt-armvirt-64-default-rootfs.tar.gz \
             https://github.com/Kwonelee/Rootfs-Actions/releases/download/generic-rootfs/istoreos-armsr-armv8-generic-rootfs.tar.gz
 
-      - name: 🔍 查找rootfs路径
-        id: find_rootfs
+      - name: 🔍 预载内核 (防止插件下载 404)
         run: |
-          ROOTFS_FILE=$(find bin/targets/armsr/armv8/ -type f -name "*rootfs.tar.gz" | head -n1)
-          echo "file=$ROOTFS_FILE" >> $GITHUB_OUTPUT
+          # 创建插件默认的内核存放目录
+          mkdir -p amlogic-s9xxx-openwrt/amlogic-kernel
+          echo "正在强行下载 A311D 稳定内核..."
+          # 这里使用 ophub 仓库里真实存在的 5.15.167 链接
+          curl -L -o amlogic-s9xxx-openwrt/amlogic-kernel/5.15.167.tar.gz \
+            https://github.com/ophub/kernel/releases/download/kernel_stable/5.15.167.tar.gz
+          echo "✅ 内核预载完成"
 
-      - name: 🧱 打包固件 (自动纠错模式)
+      - name: 🧱 打包固件
         uses: Kwonelee/amlogic-s9xxx-openwrt@main
         with:
-          openwrt_path: ${{ steps.find_rootfs.outputs.file }}
-          openwrt_board: ${{ inputs.openwrt_board }}
-          openwrt_kernel: ${{ inputs.openwrt_kernel }}
-          auto_kernel: true
+          openwrt_path: bin/targets/armsr/armv8/openwrt-armvirt-64-default-rootfs.tar.gz
+          openwrt_board: a311d-oes
+          openwrt_kernel: 5.15.167
+          auto_kernel: false  # 必须设为 false，防止它去乱搜别的版本
           kernel_repo: ophub/kernel
           kernel_usage: stable
-          builder_name: kwonelee
 
-      - name: 📜 强制整理并重命名
-        if: always() # 即使前面失败也运行，方便查看错误
+      - name: 📜 整理固件
         run: |
           mkdir -p final_out
-          echo "🔍 正在全系统搜索打包好的固件..."
-          # 查找生成的 img.gz，排除掉 rootfs
-          FOUND=$(find . -name "*.img.gz" ! -name "*rootfs*" -size +50M)
-          
-          if [ -z "$FOUND" ]; then
-            echo "❌ 警告：未找到固件。请向上滚动查看 '🧱 打包固件' 步骤中的 curl 错误。"
-            # 列出当前目录结构，方便调试
-            ls -R
-            exit 1
+          # 直接去 output 目录下找，那是插件的默认输出
+          if [ -d "output" ]; then
+            cp output/*.img.gz final_out/ 2>/dev/null || true
           fi
-
-          for FILE in $FOUND; do
-            FILENAME=$(basename "$FILE")
-            NEW_NAME="istoreos_A311D_$(date +%Y%m%d).img.gz"
-            cp "$FILE" "final_out/$NEW_NAME"
-            echo "✅ 成功获取固件: $NEW_NAME"
-          done
+          # 如果没找到，全系统搜
+          if [ -z "$(ls -A final_out)" ]; then
+            find . -name "*.img.gz" ! -name "*rootfs*" -exec cp {} final_out/ \;
+          fi
 
       - name: 🚀 上传到 Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: A311D-OES-${{ env.VERSION }}-${{ github.run_id }}
-          name: A311D-OES 稳定版 (内核 ${{ inputs.openwrt_kernel }})
-          body: |
-            🛠️ 专为 A311D-OES 适配
-            🧠 内核版本: ${{ inputs.openwrt_kernel }}
-            👤 账号: root | 密码: 无
+          tag_name: A311D-OES-Fixed-${{ github.run_id }}
           files: final_out/*.img.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
