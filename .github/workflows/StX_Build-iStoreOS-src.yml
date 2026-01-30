@@ -155,7 +155,7 @@ on:
           - s922x-gtking
           - s922x-gtkingpro-h
           - s922x-odroid-n2
-          - s922x-oes-plus
+          - s922x-固定-plus
           - s922x-reva
           - s922x-ugoos-am6
           - seewo-sv21
@@ -242,12 +242,14 @@ jobs:
       - name: 📜 调整.img.gz 文件名
         id: rename
         run: |
-          for FILE in ${{ env.PACKAGED_OUTPUTPATH }}/*.img.gz; do
+          # 默认打包输出路径为 output 目录
+          for FILE in output/*.img.gz; do
+            [ -e "$FILE" ] || continue
             echo "Processing file: $FILE"
             FILENAME=$(basename "$FILE")
-            NEW_FILENAME=$(echo "$FILENAME" | sed 's/openwrt/istoreos_${{ env.VERSION }}/g')
+            NEW_FILENAME=$(echo "$FILENAME" | sed "s/openwrt/istoreos_${{ env.VERSION }}/g")
             if [ "$FILENAME" != "$NEW_FILENAME" ]; then
-              mv "$FILE" "${{ env.PACKAGED_OUTPUTPATH }}/$NEW_FILENAME"
+              mv "$FILE" "output/$NEW_FILENAME"
               echo "Renamed $FILENAME to $NEW_FILENAME"
             else
               echo "No need to rename $FILENAME"
@@ -259,20 +261,14 @@ jobs:
         with:
           tag_name: iStoreOS-${{ env.VERSION }}-SNAPSHOT-dhcp
           body: |
-            🔄 版本： iStoreOS-${{ env.VERSION }}-SNAPSHOT（源码编译后构建，插件集成适度精简）
-            
+            🔄 版本： iStoreOS-${{ env.VERSION }}-SNAPSHOT
             📂 来源： https://github.com/istoreos/istoreos
-            
-            🧠 内核： Please Login to iStoreOS → System → Amlogic Service → Replace the Kernel
-            
-            🧩 集成： 包含了基础系统组件、驱动、网络工具、容器支持、LuCI界面及插件等
-            
+            🧠 内核： 来自 ophub/kernel (kernel_stable)
+            🧩 集成： 包含了基础系统组件、驱动、网络工具等
             👤 用户名： root
-            
             🔒 密码： 无
-            
-            🌐 IP： 单网口-动态获取（从上级路由找寻）；多网口-IP：192.168.100.1
+            🌐 IP： 单网口-动态获取；多网口-192.168.100.1
           files: |
-            ${{ env.PACKAGED_OUTPUTPATH }}/*.img.gz
+            output/*.img.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
