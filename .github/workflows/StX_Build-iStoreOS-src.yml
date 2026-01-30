@@ -1,11 +1,9 @@
-name: 💿 StX_Build-A311D-OES-Fixed
+name: 💿 StX_Build-A311D-OES-AutoFix
 on:
   workflow_dispatch:
 
 env:
   VERSION: 24.10.5
-  # 这里定义目前 kernel_stable 中真实存在且最稳的版本
-  K_VER: "5.15.167" 
 
 jobs:
   build:
@@ -20,44 +18,51 @@ jobs:
           curl -L -o bin/targets/armsr/armv8/openwrt-armvirt-64-default-rootfs.tar.gz \
             https://github.com/Kwonelee/Rootfs-Actions/releases/download/generic-rootfs/istoreos-armsr-armv8-generic-rootfs.tar.gz
 
-      - name: 🚀 强行注入内核 (解决 404)
+      - name: 🔍 动态获取内核下载链接 (解决404)
+        id: get_kernel
         run: |
-          # 创建插件默认搜索内核的本地目录
-          mkdir -p amlogic-s9xxx-openwrt/amlogic-kernel
-          echo "正在从 ophub 强行下载 A311D 稳定版内核..."
-          # 直接使用浏览器能访问的真实下载地址 
-          curl -L -o amlogic-s9xxx-openwrt/amlogic-kernel/${{ env.K_VER }}.tar.gz \
-            https://github.com/ophub/kernel/releases/download/kernel_stable/${{ env.K_VER }}.tar.gz
+          echo "🌐 正在从 ophub 仓库检索 5.15 稳定版内核..."
+          # 爬取 Release 页面并筛选 5.15 的 .tar.gz 文件名
+          KERNEL_FILE=$(curl -s https://api.github.com/repos/ophub/kernel/releases/tags/kernel_stable | grep "name" | grep "5.15" | grep ".tar.gz" | head -n 1 | cut -d '"' -f 4)
           
-          if [ ! -f "amlogic-s9xxx-openwrt/amlogic-kernel/${{ env.K_VER }}.tar.gz" ]; then
-            echo "❌ 内核下载失败，请检查链接！"
-            exit 1
+          if [ -z "$KERNEL_FILE" ]; then
+            echo "❌ 无法找到 5.15 内核文件，尝试检索 6.1..."
+            KERNEL_FILE=$(curl -s https://api.github.com/repos/ophub/kernel/releases/tags/kernel_stable | grep "name" | grep "6.1" | grep ".tar.gz" | head -n 1 | cut -d '"' -f 4)
           fi
-          echo "✅ 内核已准备就绪"
+          
+          # 提取纯版本号用于插件识别 (例如 5.15.167)
+          K_VER=$(echo $KERNEL_FILE | cut -d '.' -f 1,2,3 | cut -d '-' -f 1)
+          
+          echo "✅ 找到最新内核文件: $KERNEL_FILE"
+          echo "k_file=$KERNEL_FILE" >> $GITHUB_OUTPUT
+          echo "k_ver=$K_VER" >> $GITHUB_OUTPUT
+          
+          # 提前下载到插件目录
+          mkdir -p amlogic-s9xxx-openwrt/amlogic-kernel
+          curl -L -o amlogic-s9xxx-openwrt/amlogic-kernel/$KERNEL_FILE \
+            https://github.com/ophub/kernel/releases/download/kernel_stable/$KERNEL_FILE
+          
+          # 建立软链接，防止插件找不到对应的文件名
+          ln -s $KERNEL_FILE amlogic-s9xxx-openwrt/amlogic-kernel/$K_VER.tar.gz
 
       - name: 🧱 打包固件
         uses: Kwonelee/amlogic-s9xxx-openwrt@main
         with:
           openwrt_path: bin/targets/armsr/armv8/openwrt-armvirt-64-default-rootfs.tar.gz
           openwrt_board: a311d-oes
-          openwrt_kernel: ${{ env.K_VER }}
-          auto_kernel: false  # 关键：设为 false，强制它用我们刚才下载好的本地内核
+          openwrt_kernel: ${{ steps.get_kernel.outputs.k_ver }}
+          auto_kernel: false
           kernel_repo: ophub/kernel
           kernel_usage: stable
 
       - name: 📜 整理并搜寻固件
         run: |
           mkdir -p final_out
-          # 1. 尝试从默认输出目录找
-          [ -d "output" ] && cp output/*.img.gz final_out/ 2>/dev/null || true
-          
-          # 2. 如果没找到，全系统搜索生成的 img.gz
-          if [ -z "$(ls -A final_out)" ]; then
-            find . -name "*.img.gz" ! -name "*rootfs*" -exec cp {} final_out/ \;
-          fi
+          # 全局搜索生成的 img.gz
+          find . -name "*.img.gz" ! -name "*rootfs*" -size +50M -exec cp {} final_out/ \;
           
           if [ -z "$(ls -A final_out)" ]; then
-            echo "❌ 还是没找到固件包，打包逻辑可能由于内核不匹配中断了"
+            echo "❌ 打包失败，未生成固件包。"
             exit 1
           fi
 
@@ -65,10 +70,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: A311D-OES-iStoreOS-${{ github.run_id }}
-          name: A311D-OES 专属 iStoreOS (内核 ${{ env.K_VER }})
+          name: A311D-OES 自动匹配版 (内核 ${{ steps.get_kernel.outputs.k_ver }})
           body: |
-            👤 账号: root | 密码: 无
-            🧠 内核版本: ${{ env.K_VER }} (已解决 404 注入问题)
+            🛠️ 专为 A311D-OES 适配
+            🧠 自动匹配内核: ${{ steps.get_kernel.outputs.k_file }}
+            👤 用户: root | 密码: 无
           files: final_out/*.img.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
