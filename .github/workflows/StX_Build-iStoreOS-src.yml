@@ -20,17 +20,15 @@ on:
           - s912
           - s922x
       openwrt_kernel:
-        description: "2、选择内核来源 (支持直接输入链接)"
+        description: "2、选择内核版本 (会自动从 ophub/kernel/releases 下载)"
         required: true
-        default: "kernel_stable"
+        default: "6.6.74"
         type: choice
         options:
-          - kernel_stable
-          - custom_link
-      kernel_custom_url:
-        description: "若选custom_link，请在此输入完整.tar.gz链接"
-        required: false
-        default: "https://github.com/ophub/kernel/archive/refs/tags/kernel_stable.tar.gz"
+          - 6.6.74
+          - 6.12.11
+          - 6.1.127
+          - 5.15.178
 
 env:
   VERSION: 24.10.5
@@ -59,14 +57,16 @@ jobs:
         with:
           openwrt_path: ${{ steps.find_rootfs.outputs.file }}
           openwrt_board: ${{ inputs.openwrt_board }}
-          # --- 核心改动：如果用户选 kernel_stable，直接喂入你提供的那个链接 ---
-          openwrt_kernel: ${{ inputs.openwrt_kernel == 'kernel_stable' && 'https://github.com/ophub/kernel/archive/refs/tags/kernel_stable.tar.gz' || inputs.kernel_custom_url }}
-          auto_kernel: false # 使用固定链接时，建议关闭自动匹配
+          # 直接传入具体版本号，插件会自动拼成正确的下载链接
+          openwrt_kernel: ${{ inputs.openwrt_kernel }}
+          # 必须开启 auto_kernel，它会在具体版本号失效时自动搜寻
+          auto_kernel: true
           kernel_repo: ophub/kernel
+          # 设为 stable 会指向 kernel_stable 标签
           kernel_usage: stable
           builder_name: kwonelee
 
-      - name: 📜 整理固件并重命名
+      - name: 📜 整理并重命名固件
         run: |
           mkdir -p final_out
           if [ -d "output" ]; then
@@ -83,7 +83,7 @@ jobs:
         with:
           tag_name: iStoreOS-${{ env.VERSION }}-SNAPSHOT-dhcp
           body: |
-            🧠 内核来源：${{ inputs.openwrt_kernel }}
+            🧠 内核版本：${{ inputs.openwrt_kernel }} (来自 ophub/kernel)
             👤 用户名：root | 密码：无
           files: |
             final_out/*.img.gz
