@@ -13,32 +13,24 @@ on:
           - a311d-oes_s922x-oes-plus_wxy-oect
           - nsy-g16-plus_nsy-g68-plus_bdy-g18-pro
           - beikeyun
-          - bdy-g18-pro
           - h66k
           - h68k
-          - h69k
-          - h88k
           - nanopi-r5s
-          - nanopi-r5c
-          - orangepi-5-plus
           - s905x3
           - s912
           - s922x
       openwrt_kernel:
-        description: "2、请选择内核版本 (已自动适配稳定版链接)"
+        description: "2、选择内核来源 (支持直接输入链接)"
         required: true
-        default: "6.6.y"
+        default: "kernel_stable"
         type: choice
         options:
-          - 6.6.y
-          - 6.12.y
-          - 6.1.y
-          - 5.15.y
-      auto_kernel:
-        description: "自动使用最新内核"
+          - kernel_stable
+          - custom_link
+      kernel_custom_url:
+        description: "若选custom_link，请在此输入完整.tar.gz链接"
         required: false
-        default: true
-        type: boolean
+        default: "https://github.com/ophub/kernel/archive/refs/tags/kernel_stable.tar.gz"
 
 env:
   VERSION: 24.10.5
@@ -62,50 +54,36 @@ jobs:
           ROOTFS_FILE=$(find bin/targets/armsr/armv8/ -type f -name "*rootfs.tar.gz" | head -n1)
           echo "file=$ROOTFS_FILE" >> $GITHUB_OUTPUT
 
-      - name: 🛠️ 修正内核版本号 (防止404)
-        id: kernel_fix
-        run: |
-          # 获取用户输入
-          K_VER="${{ inputs.openwrt_kernel }}"
-          # 将模糊的 .y 转换为具体的稳定版版本号，确保 ophub 链接有效
-          case "$K_VER" in
-            "6.6.y")  FIXED_VER="6.6.74" ;;
-            "6.12.y") FIXED_VER="6.12.1" ;;
-            "6.1.y")  FIXED_VER="6.1.120" ;;
-            "5.15.y") FIXED_VER="5.15.174" ;;
-            *) FIXED_VER="$K_VER" ;;
-          esac
-          echo "fixed_v=$FIXED_VER" >> $GITHUB_OUTPUT
-          echo "✅ 内核版本已从 $K_VER 修正为 $FIXED_VER"
-
       - name: 🧱 打包iStoreOS固件
         uses: Kwonelee/amlogic-s9xxx-openwrt@main
         with:
           openwrt_path: ${{ steps.find_rootfs.outputs.file }}
           openwrt_board: ${{ inputs.openwrt_board }}
-          # 使用修正后的具体版本号
-          openwrt_kernel: ${{ steps.kernel_fix.outputs.fixed_v }}
-          auto_kernel: ${{ inputs.auto_kernel }}
+          # --- 核心改动：如果用户选 kernel_stable，直接喂入你提供的那个链接 ---
+          openwrt_kernel: ${{ inputs.openwrt_kernel == 'kernel_stable' && 'https://github.com/ophub/kernel/archive/refs/tags/kernel_stable.tar.gz' || inputs.kernel_custom_url }}
+          auto_kernel: false # 使用固定链接时，建议关闭自动匹配
           kernel_repo: ophub/kernel
           kernel_usage: stable
           builder_name: kwonelee
 
-      - name: 📜 整理固件文件
+      - name: 📜 整理固件并重命名
         run: |
           mkdir -p final_out
-          for FILE in output/*.img.gz; do
-            [ -e "$FILE" ] || continue
-            FILENAME=$(basename "$FILE")
-            NEW_FILENAME=$(echo "$FILENAME" | sed "s/openwrt/istoreos_${{ env.VERSION }}/g")
-            mv "$FILE" "final_out/$NEW_FILENAME"
-          done
+          if [ -d "output" ]; then
+            for FILE in output/*.img.gz; do
+              [ -e "$FILE" ] || continue
+              FILENAME=$(basename "$FILE")
+              NEW_FILENAME=$(echo "$FILENAME" | sed "s/openwrt/istoreos_${{ env.VERSION }}/g")
+              mv "$FILE" "final_out/$NEW_FILENAME"
+            done
+          fi
 
       - name: 🚀 上传到 Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: iStoreOS-${{ env.VERSION }}-SNAPSHOT-dhcp
           body: |
-            🧠 内核版本：${{ steps.kernel_fix.outputs.fixed_v }} (来自 ophub/kernel stable)
+            🧠 内核来源：${{ inputs.openwrt_kernel }}
             👤 用户名：root | 密码：无
           files: |
             final_out/*.img.gz
